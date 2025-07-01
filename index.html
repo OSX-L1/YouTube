@@ -56,8 +56,8 @@
 
         async function handleFetchRequest() {
             const youtubeUrl = urlInput.value.trim();
-            if (!isValidYoutubeUrl(youtubeUrl)) {
-                showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง', 'error');
+            if (!youtubeUrl) {
+                showStatus('กรุณาวางลิงก์ YouTube', 'error');
                 return;
             }
 
@@ -70,18 +70,14 @@
                 const response = await fetch(`/.netlify/functions/fetch-video?url=${encodeURIComponent(youtubeUrl)}`);
                 const data = await response.json();
 
-                // If the response status is not OK (e.g., 502, 400), it means our backend function itself had an error.
-                // We show the specific error message from the function's response body.
                 if (!response.ok) {
                     throw new Error(data.message || 'เกิดข้อผิดพลาดที่ไม่รู้จักบนเซิร์ฟเวอร์');
                 }
 
-                // The backend now sends a consistent, clean response.
-                // We just need to check the status property within the data.
-                switch (data.status) {
-                    case 'stream': displayStreamResult(data); break;
-                    case 'picker': displayPickerResult(data); break;
-                    default: throw new Error(`พบสถานะที่ไม่รู้จักจาก API: ${data.status}`);
+                if (data.status === 'picker') {
+                    displayPickerResult(data);
+                } else {
+                    throw new Error(`พบสถานะที่ไม่รู้จักจาก API: ${data.status || 'ไม่มีสถานะ'}`);
                 }
             } catch (error) {
                 console.error('Frontend Error:', error);
@@ -90,29 +86,23 @@
                 setLoadingState(false);
             }
         }
-        
-        function displayStreamResult(data) {
-            resultsContainer.classList.remove('hidden');
-            videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
-            videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x96/334155/94a3b8?text=No+Image';
-            downloadLinksContainer.innerHTML = ''; 
-            const link = createDownloadLink(data.url, 'ดาวน์โหลด (คุณภาพดีที่สุด)');
-            link.className += " bg-green-600 hover:bg-green-700 col-span-full";
-            downloadLinksContainer.appendChild(link);
-        }
 
         function displayPickerResult(data) {
             resultsContainer.classList.remove('hidden');
             videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
             videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x96/334155/94a3b8?text=No+Image';
             downloadLinksContainer.innerHTML = '';
-            const videoStreams = data.picker.filter(p => p.type === 'video' && p.audio);
-            if (videoStreams.length === 0) {
-                showStatus('ไม่พบรูปแบบวิดีโอที่มีเสียงสำหรับลิงก์นี้', 'warning');
+            
+            const videoStreams = data.picker;
+            if (!videoStreams || videoStreams.length === 0) {
+                showStatus('ไม่พบรูปแบบวิดีโอที่สามารถดาวน์โหลดได้สำหรับลิงก์นี้', 'warning');
                 return;
             }
-            videoStreams.sort((a, b) => parseInt(b.quality) - parseInt(a.quality)).forEach(stream => {
-                downloadLinksContainer.appendChild(createDownloadLink(stream.url, stream.quality));
+
+            videoStreams.forEach(stream => {
+                // The quality from Invidious is like '1920x1080', we want to show '1080p'
+                const qualityLabel = stream.quality.split('x')[1] + 'p';
+                downloadLinksContainer.appendChild(createDownloadLink(stream.url, qualityLabel));
             });
         }
         
@@ -140,7 +130,6 @@
 
         function hideStatus() { statusMessage.classList.add('hidden'); }
         function clearResults() { resultsContainer.classList.add('hidden'); }
-        function isValidYoutubeUrl(url) { return url && /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/.test(url); }
     </script>
 </body>
 </html>
