@@ -66,21 +66,25 @@
             clearResults();
 
             try {
-                // THIS IS THE CRITICAL CHANGE: We call our OWN function, not an external API.
+                // We call our own backend function, which is reliable.
                 const response = await fetch(`/.netlify/functions/fetch-video?url=${encodeURIComponent(youtubeUrl)}`);
                 const data = await response.json();
 
-                if (!response.ok || data.status === 'error') {
-                    throw new Error(data.text || data.message || 'ไม่สามารถประมวลผลลิงก์ได้');
+                // If the response status is not OK (e.g., 502, 400), it means our backend function itself had an error.
+                // We show the specific error message from the function's response body.
+                if (!response.ok) {
+                    throw new Error(data.message || 'เกิดข้อผิดพลาดที่ไม่รู้จักบนเซิร์ฟเวอร์');
                 }
 
+                // The backend now sends a consistent, clean response.
+                // We just need to check the status property within the data.
                 switch (data.status) {
                     case 'stream': displayStreamResult(data); break;
                     case 'picker': displayPickerResult(data); break;
-                    default: throw new Error(`พบสถานะที่ไม่รู้จัก: ${data.status}`);
+                    default: throw new Error(`พบสถานะที่ไม่รู้จักจาก API: ${data.status}`);
                 }
             } catch (error) {
-                console.error('An error occurred:', error);
+                console.error('Frontend Error:', error);
                 showStatus(error.message, 'error');
             } finally {
                 setLoadingState(false);
