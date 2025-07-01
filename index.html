@@ -6,7 +6,7 @@
     <title>เครื่องมือดาวน์โหลดวิดีโอ YouTube</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Inter -->
+    <!-- Google Fonts: Inter & Sarabun -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -92,8 +92,8 @@
         const videoTitle = document.getElementById('video-title');
         const downloadLinksContainer = document.getElementById('download-links');
 
-        // The third-party API endpoint
-        const API_ENDPOINT = "https://co.wuk.sh/api/json";
+        // *** UPDATED API ENDPOINT ***
+        const API_ENDPOINT = "https://api.cobalt.tools/api/json";
 
         // Event listener for the fetch button
         fetchBtn.addEventListener('click', handleFetchRequest);
@@ -114,7 +114,6 @@
                 return;
             }
             
-            // Validate if it's a plausible YouTube URL
             if (!isValidYoutubeUrl(youtubeUrl)) {
                 showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง', 'error');
                 return;
@@ -133,7 +132,7 @@
                     },
                     body: JSON.stringify({
                         url: youtubeUrl,
-                        vQuality: "max", // Request max quality to get all options
+                        vQuality: "1080", // Request a high quality to get options
                         isAudioOnly: false
                     })
                 });
@@ -144,15 +143,17 @@
 
                 const data = await response.json();
                 
-                // Handle API-specific statuses
                 if (data.status === 'error' || data.status === 'redirect') {
                     throw new Error(data.text || 'ไม่สามารถประมวลผลลิงก์ได้ ลองลิงก์อื่น');
                 }
                 
                 if (data.status === 'stream') {
                     displayResults(data);
-                } else {
-                     throw new Error('ไม่พบสตรีมวิดีโอสำหรับลิงก์นี้');
+                } else if (data.status === 'picker') { // Handle picker response type
+                    displayPickerResults(data);
+                }
+                 else {
+                     throw new Error('ไม่พบสตรีมวิดีโอสำหรับลิงก์นี้ หรือรูปแบบการตอบกลับไม่ถูกต้อง');
                 }
 
             } catch (error) {
@@ -164,44 +165,56 @@
         }
 
         /**
-         * Displays the fetched video information and download links.
+         * Displays results for 'stream' type response.
          * @param {object} data - The API response data.
          */
         function displayResults(data) {
             resultsContainer.classList.remove('hidden');
             
-            // Display video title and thumbnail
             videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
-            videoThumbnail.src = data.thumbnail || `https://i.ytimg.com/vi/${extractVideoID(urlInput.value.trim())}/hqdefault.jpg`;
-            videoThumbnail.onerror = () => {
-                videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; // Fallback image
-            };
+            // Use a proxy for the thumbnail to avoid potential mixed-content issues
+            videoThumbnail.src = data.thumbnail ? `https://images.weserv.nl/?url=${encodeURIComponent(data.thumbnail)}` : `https://i.ytimg.com/vi/${extractVideoID(urlInput.value.trim())}/hqdefault.jpg`;
+            videoThumbnail.onerror = () => { videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; };
             
-            // Clear previous links
             downloadLinksContainer.innerHTML = '';
 
-            // Filter for MP4 videos and sort by quality
+            const link = document.createElement('a');
+            link.href = data.url;
+            link.textContent = `ดาวน์โหลด (คุณภาพดีที่สุด)`;
+            link.setAttribute('download', '');
+            link.setAttribute('target', '_blank');
+            link.className = "bg-green-600 hover:bg-green-700 col-span-full text-white text-center font-medium py-3 px-4 rounded-lg transition duration-300 ease-in-out";
+            downloadLinksContainer.appendChild(link);
+        }
+
+        /**
+         * Displays results for 'picker' type response.
+         * @param {object} data - The API response data.
+         */
+        function displayPickerResults(data) {
+            resultsContainer.classList.remove('hidden');
+            videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
+            videoThumbnail.src = data.thumbnail ? `https://images.weserv.nl/?url=${encodeURIComponent(data.thumbnail)}` : `https://i.ytimg.com/vi/${extractVideoID(urlInput.value.trim())}/hqdefault.jpg`;
+            videoThumbnail.onerror = () => { videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; };
+
+            downloadLinksContainer.innerHTML = '';
+            
+            // Filter for video streams with audio
             const videoStreams = data.picker
-                .filter(item => item.type === 'video' && item.format.toLowerCase().includes('mp4'))
-                .sort((a, b) => {
-                    // Simple sort by quality string (e.g., "1080p" > "720p")
-                    const qualityA = parseInt(a.quality);
-                    const qualityB = parseInt(b.quality);
-                    return qualityB - qualityA;
-                });
+                .filter(item => item.type === 'video' && item.audio === true)
+                .sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
 
             if (videoStreams.length === 0) {
-                showStatus('ไม่พบไฟล์วิดีโอ MP4 สำหรับดาวน์โหลด', 'warning');
+                showStatus('ไม่พบไฟล์วิดีโอ MP4 ที่มีเสียงสำหรับดาวน์โหลด', 'warning');
                 return;
             }
 
-            // Create and append download links
             videoStreams.forEach(stream => {
                 const link = document.createElement('a');
                 link.href = stream.url;
                 link.textContent = `${stream.quality}`;
-                link.setAttribute('download', ''); // Suggests to browser to download
-                link.setAttribute('target', '_blank'); // Open in new tab to start download
+                link.setAttribute('download', '');
+                link.setAttribute('target', '_blank');
                 link.className = "bg-gray-600 hover:bg-gray-500 text-white text-center font-medium py-2 px-4 rounded-lg transition duration-300 ease-in-out";
                 downloadLinksContainer.appendChild(link);
             });
