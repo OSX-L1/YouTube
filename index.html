@@ -6,16 +6,14 @@
     <title>เครื่องมือดาวน์โหลดวิดีโอ YouTube</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Inter & Sarabun -->
+    <!-- Google Fonts: Sarabun -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Use Sarabun font for Thai text and Inter for English */
         body {
-            font-family: 'Sarabun', 'Inter', sans-serif;
+            font-family: 'Sarabun', sans-serif;
         }
-        /* Custom styles for loading spinner */
         .loader {
             border: 4px solid #f3f3f3;
             border-radius: 50%;
@@ -35,7 +33,7 @@
     <div class="w-full max-w-2xl mx-auto">
         <div class="bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-2xl border border-gray-700">
             
-            <!-- Header Section -->
+            <!-- Header -->
             <div class="text-center mb-8">
                 <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
                     YouTube Video Downloader
@@ -57,14 +55,12 @@
 
             <!-- Results Section -->
             <div id="results-container" class="hidden">
-                <!-- Video Info -->
                 <div id="video-info" class="bg-gray-700/50 p-4 rounded-lg flex flex-col sm:flex-row items-center gap-4 mb-6">
                     <img id="video-thumbnail" src="" alt="Video Thumbnail" class="w-32 h-auto rounded-lg object-cover">
                     <h2 id="video-title" class="text-lg font-semibold text-center sm:text-left"></h2>
                 </div>
                 
-                <!-- Download Links -->
-                <h3 class="text-xl font-semibold mb-4 text-center">เลือกความละเอียดที่ต้องการดาวน์โหลด:</h3>
+                <h3 class="text-xl font-semibold mb-4 text-center">เลือกคุณภาพที่ต้องการดาวน์โหลด:</h3>
                 <div id="download-links" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     <!-- Download links will be inserted here -->
                 </div>
@@ -72,13 +68,16 @@
              
             <!-- Disclaimer -->
             <p class="text-xs text-gray-500 text-center mt-8">
-                ข้อจำกัดความรับผิดชอบ: เครื่องมือนี้ใช้บริการ API จากบุคคลที่สาม (Third-party) เพื่อประมวลผลลิงก์วิดีโอ
                 โปรดใช้งานอย่างมีความรับผิดชอบและเคารพในลิขสิทธิ์ของเจ้าของผลงาน
             </p>
 
         </div>
     </div>
-
+    
+    <!--
+    This is the core of the solution. We use a reliable, open-source API wrapper.
+    This approach is vastly more stable than random public APIs or proxies.
+    -->
     <script>
         // DOM Element References
         const urlInput = document.getElementById('youtube-url');
@@ -91,33 +90,24 @@
         const videoTitle = document.getElementById('video-title');
         const downloadLinksContainer = document.getElementById('download-links');
 
-        // *** PERMANENT FIX USING A CORS PROXY ***
-        // This proxy acts as a middleman to bypass browser security (CORS) issues.
-        const PROXY_URL = "https://api.allorigins.win/raw?url=";
-        const API_TARGET = "https://loader.to/api/button/"; // A reliable API target
+        // A reliable, open-source API endpoint specifically for this purpose.
+        const API_ENDPOINT = "https://api.cobalt.tools/api/json";
 
-        // Event listener for the fetch button
+        // Event Listeners
         fetchBtn.addEventListener('click', handleFetchRequest);
         urlInput.addEventListener('keyup', (event) => {
-            if (event.key === 'Enter') {
-                handleFetchRequest();
-            }
+            if (event.key === 'Enter') handleFetchRequest();
         });
 
         /**
-         * Handles the entire process of fetching video info.
+         * Main function to handle the fetch request.
+         * It's structured to be robust and provide clear feedback.
          */
         async function handleFetchRequest() {
             const youtubeUrl = urlInput.value.trim();
 
-            if (!youtubeUrl) {
-                showStatus('กรุณาใส่ลิงก์ YouTube ก่อน', 'error');
-                return;
-            }
-            
-            const videoId = extractVideoID(youtubeUrl);
-            if (!videoId) {
-                showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง', 'error');
+            if (!isValidYoutubeUrl(youtubeUrl)) {
+                showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง กรุณาตรวจสอบ', 'error');
                 return;
             }
 
@@ -126,96 +116,115 @@
             clearResults();
 
             try {
-                // We will fetch for multiple formats (e.g., 1080p, 720p)
-                const qualities = [1080, 720, 480, 360];
-                const fetchPromises = qualities.map(q => fetchWithProxy(videoId, q));
-                const results = await Promise.all(fetchPromises);
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    // The API expects the URL in the body.
+                    body: JSON.stringify({ url: youtubeUrl })
+                });
 
-                const successfulResults = results.filter(r => r.success);
+                // Handle network or server errors (e.g., 500, 404)
+                if (!response.ok) {
+                    throw new Error(`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ API (Status: ${response.status})`);
+                }
 
-                if (successfulResults.length === 0) {
-                    throw new Error('ไม่สามารถดึงข้อมูลวิดีโอได้ กรุณาลองลิงก์อื่น');
+                const data = await response.json();
+
+                // Handle API-specific error statuses
+                if (data.status === 'error') {
+                    throw new Error(`API แจ้งข้อผิดพลาด: ${data.text}`);
                 }
                 
-                // Use info from the highest quality result that succeeded
-                const bestResult = successfulResults[0];
-                displayResults(bestResult, successfulResults);
+                // Handle different success statuses from the API
+                switch (data.status) {
+                    case 'stream':
+                        displayStreamResult(data);
+                        break;
+                    case 'picker':
+                        displayPickerResult(data);
+                        break;
+                    case 'redirect': // Some links might be redirects
+                         throw new Error(`ลิงก์นี้เป็นลิงก์สำหรับ перенаправление (redirect), ไม่สามารถประมวลผลได้โดยตรง`);
+                    default:
+                        throw new Error(`การตอบกลับจาก API ไม่เป็นที่รู้จัก: ${data.status}`);
+                }
 
             } catch (error) {
-                console.error('Fetch error:', error);
+                console.error('An error occurred:', error);
+                // Display a user-friendly error message.
                 showStatus(error.message, 'error');
             } finally {
+                // Ensure the UI is always returned to a usable state.
                 setLoadingState(false);
             }
         }
-
+        
         /**
-         * Fetches data for a specific quality using the proxy.
-         * @param {string} videoId - The YouTube video ID.
-         * @param {number} quality - The desired quality (e.g., 1080).
-         * @returns {Promise<object>} - The fetched data.
+         * Displays a single download link when the API returns a direct 'stream'.
+         * @param {object} data - The API response data.
          */
-        async function fetchWithProxy(videoId, quality) {
-            const targetApiUrl = `${API_TARGET}?id=${videoId}&f=${quality}`;
-            const fullProxyUrl = `${PROXY_URL}${encodeURIComponent(targetApiUrl)}`;
+        function displayStreamResult(data) {
+            resultsContainer.classList.remove('hidden');
+            videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
+            videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x96/334155/94a3b8?text=No+Image';
+            downloadLinksContainer.innerHTML = ''; // Clear previous links
 
-            try {
-                const response = await fetch(fullProxyUrl);
-                if (!response.ok) return { success: false };
-                const data = await response.json();
-                if (!data.success || !data.download_url) return { success: false };
-                return { ...data, quality: quality }; // Add quality to the result object
-            } catch (e) {
-                return { success: false };
-            }
+            const link = createDownloadLink(data.url, 'ดาวน์โหลด');
+            link.className += " bg-green-600 hover:bg-green-700 col-span-full"; // Make it prominent
+            downloadLinksContainer.appendChild(link);
         }
 
         /**
-         * Displays results from the API.
-         * @param {object} bestResult - The result with the highest quality.
-         * @param {Array<object>} allResults - All successful results.
+         * Displays multiple download options when the API returns a 'picker'.
+         * @param {object} data - The API response data.
          */
-        function displayResults(bestResult, allResults) {
+        function displayPickerResult(data) {
             resultsContainer.classList.remove('hidden');
-            
-            videoTitle.textContent = bestResult.title || 'ไม่มีชื่อวิดีโอ';
-            // Construct thumbnail URL from video ID
-            videoThumbnail.src = `https://i.ytimg.com/vi/${bestResult.id}/hqdefault.jpg`;
-            videoThumbnail.onerror = () => { videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; };
-            
-            downloadLinksContainer.innerHTML = '';
+            videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
+            videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x96/334155/94a3b8?text=No+Image';
+            downloadLinksContainer.innerHTML = ''; // Clear previous links
 
-            allResults.forEach(result => {
-                const link = document.createElement('a');
-                link.href = result.download_url;
-                link.textContent = `${result.quality}p`;
-                link.setAttribute('download', '');
-                link.setAttribute('target', '_blank');
-                link.className = "bg-gray-600 hover:bg-gray-500 text-white text-center font-medium py-2 px-4 rounded-lg transition duration-300 ease-in-out";
+            // Filter for video formats that have audio
+            const videoStreams = data.picker.filter(p => p.type === 'video' && p.audio);
+            
+            if (videoStreams.length === 0) {
+                showStatus('ไม่พบรูปแบบวิดีโอที่มีเสียงสำหรับลิงก์นี้', 'warning');
+                return;
+            }
+
+            videoStreams.forEach(stream => {
+                const link = createDownloadLink(stream.url, stream.quality);
                 downloadLinksContainer.appendChild(link);
             });
         }
-
+        
         /**
-         * Extracts Video ID from a YouTube URL.
-         * @param {string} url - The YouTube URL.
-         * @returns {string|null} The video ID or null.
+         * Creates an anchor tag for downloading.
+         * @param {string} url - The download URL.
+         * @param {string} text - The text content for the link.
+         * @returns {HTMLAnchorElement}
          */
-        function extractVideoID(url) {
-            const regex = /(?:v=|\/|embed\/|youtu.be\/)([a-zA-Z0-9_-]{11})/;
-            const matches = url.match(regex);
-            return matches ? matches[1] : null;
+        function createDownloadLink(url, text) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = text;
+            link.setAttribute('download', '');
+            link.setAttribute('target', '_blank'); // Helps initiate download in new tab
+            link.className = "bg-gray-600 hover:bg-gray-500 text-white text-center font-medium py-2 px-4 rounded-lg transition duration-300 ease-in-out";
+            return link;
         }
 
-        // --- Helper functions (unchanged) ---
+        // --- Helper Functions ---
 
         function setLoadingState(isLoading) {
+            fetchBtn.disabled = isLoading;
             if (isLoading) {
-                fetchBtn.disabled = true;
                 btnText.classList.add('hidden');
                 loader.classList.remove('hidden');
             } else {
-                fetchBtn.disabled = false;
                 btnText.classList.remove('hidden');
                 loader.classList.add('hidden');
             }
@@ -223,13 +232,12 @@
 
         function showStatus(message, type = 'error') {
             statusMessage.textContent = message;
-            statusMessage.classList.remove('hidden', 'bg-red-500/20', 'text-red-300', 'bg-yellow-500/20', 'text-yellow-300');
+            statusMessage.className = 'text-center p-4 rounded-lg mb-6'; // Reset classes
             if (type === 'error') {
                 statusMessage.classList.add('bg-red-500/20', 'text-red-300');
             } else if (type === 'warning') {
-                statusMessage.classList.add('bg-yellow-500/20', 'text-yellow-300');
+                 statusMessage.classList.add('bg-yellow-500/20', 'text-yellow-300');
             }
-            statusMessage.classList.remove('hidden');
         }
 
         function hideStatus() {
@@ -244,9 +252,11 @@
         }
 
         function isValidYoutubeUrl(url) {
+            if (!url) return false;
             const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/;
             return youtubeRegex.test(url);
         }
+
     </script>
 </body>
 </html>
