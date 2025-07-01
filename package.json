@@ -1,0 +1,15 @@
+{
+  "name": "youtube-downloader-function",
+  "version": "1.0.0",
+  "description": "Netlify function to fetch YouTube video info using yt-dlp.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "yt-dlp-wrap": "^2.3.12"
+  }
+}
+
