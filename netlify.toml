@@ -1,22 +1,14 @@
-# This configuration file tells Netlify how to build and deploy your site.
+# This configuration file tells Netlify how to build and deploy the Python function.
 
 [build]
-  # This command is not needed for our simple setup.
-  command = "echo 'No build command needed'"
-  # The directory where your public files are located.
+  # This command tells Netlify to install the Python packages listed in requirements.txt.
+  command = "pip install -r requirements.txt"
+  # The directory where your public files (index.html) are located.
   publish = "/"
 
 [functions]
-  # The directory where our serverless function code is located.
+  # The directory where our Python serverless function is located.
   directory = "netlify/functions"
-  # Use the 'esbuild' bundler for better performance.
-  node_bundler = "esbuild"
-
-# THIS IS THE CRITICAL FIX:
-# This section specifies settings for all functions.
-[functions."*"]
-  # We are explicitly telling Netlify to use the Node.js 20.x runtime.
-  # This modern runtime is based on Amazon Linux 2023, which includes Python 3.
-  # This solves the "env: 'python3': No such file or directory" error permanently.
-  node_runtime = "nodejs20.x"
+  # We need to include the installed packages in our function bundle.
+  included_files = ["!**/*.node"]
 
