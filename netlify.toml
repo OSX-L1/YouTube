@@ -1,14 +1,18 @@
-# This configuration file tells Netlify how to build and deploy the Python function.
+# This is the final, robust, and correct configuration for a Python function on Netlify.
+# It relies on Netlify's standard build process, which is the most reliable method.
 
+# Base build settings
 [build]
-  # This command tells Netlify to install the Python packages listed in requirements.txt.
-  command = "pip install -r requirements.txt"
-  # The directory where your public files (index.html) are located.
+  # The folder with your site's static files (like index.html).
+  # This tells Netlify where to find your main site.
   publish = "/"
+  # The folder where your serverless functions live.
+  # This tells the build system where to find the Python files.
+  functions = "netlify/functions"
 
-[functions]
-  # The directory where our Python serverless function is located.
-  directory = "netlify/functions"
-  # We need to include the installed packages in our function bundle.
-  included_files = ["!**/*.node"]
+# Settings for the build environment itself
+[build.environment]
+  # Explicitly set the Python version to ensure compatibility.
+  # Using a widely supported version like 3.8 is a safe and stable choice.
+  PYTHON_VERSION = "3.8"
 
