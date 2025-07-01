@@ -74,10 +74,6 @@
         </div>
     </div>
     
-    <!--
-    This is the core of the solution. We use a reliable, open-source API wrapper.
-    This approach is vastly more stable than random public APIs or proxies.
-    -->
     <script>
         // DOM Element References
         const urlInput = document.getElementById('youtube-url');
@@ -90,7 +86,7 @@
         const videoTitle = document.getElementById('video-title');
         const downloadLinksContainer = document.getElementById('download-links');
 
-        // A reliable, open-source API endpoint specifically for this purpose.
+        // This is a stable, well-maintained API endpoint for this purpose.
         const API_ENDPOINT = "https://api.cobalt.tools/api/json";
 
         // Event Listeners
@@ -101,13 +97,13 @@
 
         /**
          * Main function to handle the fetch request.
-         * It's structured to be robust and provide clear feedback.
+         * This version includes robust error handling and clear user feedback.
          */
         async function handleFetchRequest() {
             const youtubeUrl = urlInput.value.trim();
 
             if (!isValidYoutubeUrl(youtubeUrl)) {
-                showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง กรุณาตรวจสอบ', 'error');
+                showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง', 'error');
                 return;
             }
 
@@ -122,23 +118,17 @@
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    // The API expects the URL in the body.
                     body: JSON.stringify({ url: youtubeUrl })
                 });
 
-                // Handle network or server errors (e.g., 500, 404)
+                // Handle fundamental network or server errors
                 if (!response.ok) {
-                    throw new Error(`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ API (Status: ${response.status})`);
+                    throw new Error(`การสื่อสารกับเซิร์ฟเวอร์ล้มเหลว (Status: ${response.status}) โปรดลองอีกครั้งในภายหลัง`);
                 }
 
                 const data = await response.json();
 
-                // Handle API-specific error statuses
-                if (data.status === 'error') {
-                    throw new Error(`API แจ้งข้อผิดพลาด: ${data.text}`);
-                }
-                
-                // Handle different success statuses from the API
+                // Handle API-specific statuses with clear messages
                 switch (data.status) {
                     case 'stream':
                         displayStreamResult(data);
@@ -146,54 +136,62 @@
                     case 'picker':
                         displayPickerResult(data);
                         break;
-                    case 'redirect': // Some links might be redirects
-                         throw new Error(`ลิงก์นี้เป็นลิงก์สำหรับ перенаправление (redirect), ไม่สามารถประมวลผลได้โดยตรง`);
+                    case 'error':
+                        throw new Error(`API แจ้งข้อผิดพลาด: ${data.text}`);
+                    case 'redirect':
+                         throw new Error(`ลิงก์นี้เป็นลิงก์สำหรับ перенаправление (redirect) และไม่สามารถประมวลผลได้`);
                     default:
-                        throw new Error(`การตอบกลับจาก API ไม่เป็นที่รู้จัก: ${data.status}`);
+                        throw new Error(`พบสถานะที่ไม่รู้จักจากการตอบกลับของ API: ${data.status}`);
                 }
 
             } catch (error) {
-                console.error('An error occurred:', error);
-                // Display a user-friendly error message.
+                console.error('An error occurred during the fetch process:', error);
+                // Display a user-friendly and specific error message.
                 showStatus(error.message, 'error');
             } finally {
-                // Ensure the UI is always returned to a usable state.
+                // This block ALWAYS runs, ensuring the UI is never left in a loading state.
                 setLoadingState(false);
             }
         }
         
         /**
-         * Displays a single download link when the API returns a direct 'stream'.
+         * Displays a single download link for a 'stream' response.
          * @param {object} data - The API response data.
          */
         function displayStreamResult(data) {
             resultsContainer.classList.remove('hidden');
             videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
             videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x96/334155/94a3b8?text=No+Image';
-            downloadLinksContainer.innerHTML = ''; // Clear previous links
+            downloadLinksContainer.innerHTML = ''; 
 
-            const link = createDownloadLink(data.url, 'ดาวน์โหลด');
-            link.className += " bg-green-600 hover:bg-green-700 col-span-full"; // Make it prominent
+            const link = createDownloadLink(data.url, 'ดาวน์โหลด (คุณภาพดีที่สุด)');
+            link.className += " bg-green-600 hover:bg-green-700 col-span-full";
             downloadLinksContainer.appendChild(link);
         }
 
         /**
-         * Displays multiple download options when the API returns a 'picker'.
+         * Displays multiple download options for a 'picker' response.
          * @param {object} data - The API response data.
          */
         function displayPickerResult(data) {
             resultsContainer.classList.remove('hidden');
             videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
             videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x96/334155/94a3b8?text=No+Image';
-            downloadLinksContainer.innerHTML = ''; // Clear previous links
+            downloadLinksContainer.innerHTML = '';
 
-            // Filter for video formats that have audio
             const videoStreams = data.picker.filter(p => p.type === 'video' && p.audio);
             
             if (videoStreams.length === 0) {
                 showStatus('ไม่พบรูปแบบวิดีโอที่มีเสียงสำหรับลิงก์นี้', 'warning');
                 return;
             }
+
+            // Sort by quality, highest first
+            videoStreams.sort((a, b) => {
+                const qualityA = parseInt(a.quality);
+                const qualityB = parseInt(b.quality);
+                return qualityB - qualityA;
+            });
 
             videoStreams.forEach(stream => {
                 const link = createDownloadLink(stream.url, stream.quality);
@@ -202,9 +200,9 @@
         }
         
         /**
-         * Creates an anchor tag for downloading.
+         * Factory function to create a download link anchor tag.
          * @param {string} url - The download URL.
-         * @param {string} text - The text content for the link.
+         * @param {string} text - The text for the link.
          * @returns {HTMLAnchorElement}
          */
         function createDownloadLink(url, text) {
@@ -212,12 +210,12 @@
             link.href = url;
             link.textContent = text;
             link.setAttribute('download', '');
-            link.setAttribute('target', '_blank'); // Helps initiate download in new tab
+            link.setAttribute('target', '_blank');
             link.className = "bg-gray-600 hover:bg-gray-500 text-white text-center font-medium py-2 px-4 rounded-lg transition duration-300 ease-in-out";
             return link;
         }
 
-        // --- Helper Functions ---
+        // --- UI Helper Functions (unchanged but crucial) ---
 
         function setLoadingState(isLoading) {
             fetchBtn.disabled = isLoading;
