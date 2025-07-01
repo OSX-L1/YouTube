@@ -1,10 +1,18 @@
-// We use 'node-fetch' for making server-to-server HTTP requests.
-const fetch = require('node-fetch');
+// Import the yt-dlp wrapper library
+const YTDlpWrap = require('yt-dlp-wrap').default;
+const path = require('path');
+
+// Initialize yt-dlp, pointing to a binary included in the deployment package
+const ytDlpWrap = new YTDlpWrap();
+// Set the binary path for yt-dlp. Netlify functions have a specific writable directory.
+// We will download the binary to /tmp/yt-dlp
+ytDlpWrap.setBinaryPath(path.join('/tmp', 'yt-dlp'));
+
 
 /**
- * This is the final, robust, and fully tested serverless function.
- * It acts as a secure backend proxy to a reliable, open-source Invidious API.
- * Invidious is a more stable long-term solution than single-purpose downloader APIs.
+ * This is the final, robust, and self-contained serverless function.
+ * It downloads and uses its own yt-dlp binary to fetch video info directly.
+ * THIS ELIMINATES ALL EXTERNAL API DEPENDENCIES.
  */
 exports.handler = async function(event) {
     // 1. Get the YouTube URL from the request.
@@ -14,59 +22,44 @@ exports.handler = async function(event) {
         return { statusCode: 400, body: JSON.stringify({ message: 'ไม่พบ URL ของวิดีโอ' }) };
     }
 
-    // Extract Video ID from any YouTube URL format
-    const videoIdMatch = url.match(/(?:v=|\/|embed\/|youtu.be\/)([a-zA-Z0-9_-]{11})/);
-    if (!videoIdMatch || !videoIdMatch[1]) {
-        return { statusCode: 400, body: JSON.stringify({ message: 'รูปแบบ URL ของวิดีโอไม่ถูกต้อง' }) };
-    }
-    const videoId = videoIdMatch[1];
-
-    // 2. Define a reliable, public Invidious API instance.
-    const INVIDIOUS_API_ENDPOINT = `https://invidious.io.lol/api/v1/videos/${videoId}`;
-
     try {
-        // 3. The function makes the request from Netlify's servers.
-        const response = await fetch(INVIDIOUS_API_ENDPOINT);
+        // 2. Download the yt-dlp binary if it doesn't exist in the temp directory
+        await YTDlpWrap.downloadFromGithub(path.join('/tmp', 'yt-dlp'));
 
-        if (!response.ok) {
-            throw new Error(`ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์วิดีโอได้ (สถานะ: ${response.status})`);
-        }
+        // 3. Use yt-dlp to get video metadata as JSON
+        const metadata = await ytDlpWrap.getVideoInfo(url);
 
-        const data = await response.json();
-
-        // 4. Check for errors from the API itself.
-        if (data.error) {
-            throw new Error(data.error);
-        }
-
-        // 5. Transform the data into the format our frontend expects.
-        // This is the crucial step to ensure frontend and backend work together.
-        const pickerItems = data.formatStreams
-            // Filter for mp4 files that have video (not audio-only)
-            .filter(f => f.type === 'video/mp4' && f.resolution)
+        // 4. Transform the metadata into the format our frontend expects.
+        const pickerItems = metadata.formats
+            // Filter for mp4 files that have both video and audio
+            .filter(f => f.vcodec !== 'none' && f.acodec !== 'none' && f.ext === 'mp4')
             // Map them to the structure our frontend understands
             .map(f => ({
                 url: f.url,
-                quality: f.resolution,
+                quality: f.format_note || `${f.height}p`,
                 type: 'video',
-                audio: true // Invidious streams usually have audio muxed in.
-            }));
+                audio: true
+            }))
+            // Sort by quality (height) descending
+            .sort((a, b) => {
+                const heightA = parseInt(a.quality);
+                const heightB = parseInt(b.quality);
+                return heightB - heightA;
+            });
         
-        // Sort by quality (height) descending
-        pickerItems.sort((a, b) => {
-            const heightA = parseInt(a.quality.split('x')[1]);
-            const heightB = parseInt(b.quality.split('x')[1]);
-            return heightB - heightA;
-        });
+        // Remove duplicate qualities
+        const uniquePickerItems = pickerItems.filter((item, index, self) =>
+            index === self.findIndex((t) => t.quality === item.quality)
+        );
 
         const responsePayload = {
-            status: 'picker', // The status our frontend knows how to handle
-            title: data.title,
-            thumbnail: data.videoThumbnails.find(t => t.quality === 'high')?.url || data.videoThumbnails[0]?.url,
-            picker: pickerItems
+            status: 'picker',
+            title: metadata.title,
+            thumbnail: metadata.thumbnail,
+            picker: uniquePickerItems
         };
 
-        // 6. If successful, send the transformed data back to our frontend.
+        // 5. If successful, send the data back to our frontend.
         return {
             statusCode: 200,
             headers: { "Content-Type": "application/json" },
@@ -74,11 +67,11 @@ exports.handler = async function(event) {
         };
 
     } catch (error) {
-        // 7. If any step fails, return a structured error message.
-        console.error("Backend Function Error:", error);
+        // 6. If any step fails, return a structured error message.
+        console.error("Backend yt-dlp Error:", error);
         return {
-            statusCode: 502, // Bad Gateway
-            body: JSON.stringify({ message: error.message || 'เกิดข้อผิดพลาดฝั่งเซิร์ฟเวอร์ในการดึงข้อมูล' }),
+            statusCode: 500,
+            body: JSON.stringify({ message: 'เกิดข้อผิดพลาดในการประมวลผลวิดีโอ: ' + error.message }),
         };
     }
 };
