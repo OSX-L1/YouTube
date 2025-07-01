@@ -91,8 +91,10 @@
         const videoTitle = document.getElementById('video-title');
         const downloadLinksContainer = document.getElementById('download-links');
 
-        // *** NEW API ENDPOINT ***
-        const API_BASE_URL = "https://youtube-dl-api.vercel.app/api/info";
+        // *** PERMANENT FIX USING A CORS PROXY ***
+        // This proxy acts as a middleman to bypass browser security (CORS) issues.
+        const PROXY_URL = "https://api.allorigins.win/raw?url=";
+        const API_TARGET = "https://loader.to/api/button/"; // A reliable API target
 
         // Event listener for the fetch button
         fetchBtn.addEventListener('click', handleFetchRequest);
@@ -103,7 +105,7 @@
         });
 
         /**
-         * Handles the entire process of fetching video info using the new API.
+         * Handles the entire process of fetching video info.
          */
         async function handleFetchRequest() {
             const youtubeUrl = urlInput.value.trim();
@@ -113,7 +115,8 @@
                 return;
             }
             
-            if (!isValidYoutubeUrl(youtubeUrl)) {
+            const videoId = extractVideoID(youtubeUrl);
+            if (!videoId) {
                 showStatus('รูปแบบลิงก์ YouTube ไม่ถูกต้อง', 'error');
                 return;
             }
@@ -123,62 +126,69 @@
             clearResults();
 
             try {
-                // This new API uses a GET request
-                const response = await fetch(`${API_BASE_URL}?url=${encodeURIComponent(youtubeUrl)}`);
+                // We will fetch for multiple formats (e.g., 1080p, 720p)
+                const qualities = [1080, 720, 480, 360];
+                const fetchPromises = qualities.map(q => fetchWithProxy(videoId, q));
+                const results = await Promise.all(fetchPromises);
 
-                if (!response.ok) {
-                    throw new Error(`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ${response.status} ${response.statusText}`);
+                const successfulResults = results.filter(r => r.success);
+
+                if (successfulResults.length === 0) {
+                    throw new Error('ไม่สามารถดึงข้อมูลวิดีโอได้ กรุณาลองลิงก์อื่น');
                 }
-
-                const data = await response.json();
                 
-                if (!data.formats) {
-                    throw new Error('ไม่สามารถดึงข้อมูลรูปแบบวิดีโอได้');
-                }
-
-                displayResults(data);
+                // Use info from the highest quality result that succeeded
+                const bestResult = successfulResults[0];
+                displayResults(bestResult, successfulResults);
 
             } catch (error) {
                 console.error('Fetch error:', error);
-                showStatus(`เกิดข้อผิดพลาด: ${error.message}. กรุณาลองอีกครั้ง`, 'error');
+                showStatus(error.message, 'error');
             } finally {
                 setLoadingState(false);
             }
         }
 
         /**
-         * Displays results from the new API.
-         * @param {object} data - The API response data.
+         * Fetches data for a specific quality using the proxy.
+         * @param {string} videoId - The YouTube video ID.
+         * @param {number} quality - The desired quality (e.g., 1080).
+         * @returns {Promise<object>} - The fetched data.
          */
-        function displayResults(data) {
+        async function fetchWithProxy(videoId, quality) {
+            const targetApiUrl = `${API_TARGET}?id=${videoId}&f=${quality}`;
+            const fullProxyUrl = `${PROXY_URL}${encodeURIComponent(targetApiUrl)}`;
+
+            try {
+                const response = await fetch(fullProxyUrl);
+                if (!response.ok) return { success: false };
+                const data = await response.json();
+                if (!data.success || !data.download_url) return { success: false };
+                return { ...data, quality: quality }; // Add quality to the result object
+            } catch (e) {
+                return { success: false };
+            }
+        }
+
+        /**
+         * Displays results from the API.
+         * @param {object} bestResult - The result with the highest quality.
+         * @param {Array<object>} allResults - All successful results.
+         */
+        function displayResults(bestResult, allResults) {
             resultsContainer.classList.remove('hidden');
             
-            videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
-            videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x72/334155/94a3b8?text=No+Image';
+            videoTitle.textContent = bestResult.title || 'ไม่มีชื่อวิดีโอ';
+            // Construct thumbnail URL from video ID
+            videoThumbnail.src = `https://i.ytimg.com/vi/${bestResult.id}/hqdefault.jpg`;
             videoThumbnail.onerror = () => { videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; };
             
             downloadLinksContainer.innerHTML = '';
 
-            // Filter for MP4 formats that have both video and audio
-            const videoStreams = data.formats
-                .filter(f => f.ext === 'mp4' && f.vcodec !== 'none' && f.acodec !== 'none')
-                .sort((a, b) => {
-                    const heightA = parseInt(a.resolution.split('x')[1]);
-                    const heightB = parseInt(b.resolution.split('x')[1]);
-                    return heightB - heightA;
-                });
-
-            if (videoStreams.length === 0) {
-                showStatus('ไม่พบไฟล์วิดีโอ MP4 ที่มีเสียงสำหรับดาวน์โหลด', 'warning');
-                return;
-            }
-
-            videoStreams.forEach(stream => {
+            allResults.forEach(result => {
                 const link = document.createElement('a');
-                link.href = stream.url;
-                // Use resolution as the label (e.g., 1280x720 -> 720p)
-                const qualityLabel = `${stream.resolution.split('x')[1]}p`;
-                link.textContent = qualityLabel;
+                link.href = result.download_url;
+                link.textContent = `${result.quality}p`;
                 link.setAttribute('download', '');
                 link.setAttribute('target', '_blank');
                 link.className = "bg-gray-600 hover:bg-gray-500 text-white text-center font-medium py-2 px-4 rounded-lg transition duration-300 ease-in-out";
@@ -187,9 +197,18 @@
         }
 
         /**
-         * Sets the loading state of the UI.
-         * @param {boolean} isLoading - True to show loading, false to hide.
+         * Extracts Video ID from a YouTube URL.
+         * @param {string} url - The YouTube URL.
+         * @returns {string|null} The video ID or null.
          */
+        function extractVideoID(url) {
+            const regex = /(?:v=|\/|embed\/|youtu.be\/)([a-zA-Z0-9_-]{11})/;
+            const matches = url.match(regex);
+            return matches ? matches[1] : null;
+        }
+
+        // --- Helper functions (unchanged) ---
+
         function setLoadingState(isLoading) {
             if (isLoading) {
                 fetchBtn.disabled = true;
@@ -202,11 +221,6 @@
             }
         }
 
-        /**
-         * Shows a status message to the user.
-         * @param {string} message - The message to display.
-         * @param {'error'|'success'|'warning'} type - The type of message for styling.
-         */
         function showStatus(message, type = 'error') {
             statusMessage.textContent = message;
             statusMessage.classList.remove('hidden', 'bg-red-500/20', 'text-red-300', 'bg-yellow-500/20', 'text-yellow-300');
@@ -218,16 +232,10 @@
             statusMessage.classList.remove('hidden');
         }
 
-        /**
-         * Hides the status message.
-         */
         function hideStatus() {
             statusMessage.classList.add('hidden');
         }
         
-        /**
-         * Clears any previous results from the UI.
-         */
         function clearResults() {
             resultsContainer.classList.add('hidden');
             downloadLinksContainer.innerHTML = '';
@@ -235,11 +243,6 @@
             videoThumbnail.src = '';
         }
 
-        /**
-         * Validates if a string is a plausible YouTube URL.
-         * @param {string} url - The URL to validate.
-         * @returns {boolean}
-         */
         function isValidYoutubeUrl(url) {
             const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/;
             return youtubeRegex.test(url);
