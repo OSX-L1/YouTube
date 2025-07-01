@@ -87,13 +87,12 @@
         const loader = document.getElementById('loader');
         const statusMessage = document.getElementById('status-message');
         const resultsContainer = document.getElementById('results-container');
-        const videoInfo = document.getElementById('video-info');
         const videoThumbnail = document.getElementById('video-thumbnail');
         const videoTitle = document.getElementById('video-title');
         const downloadLinksContainer = document.getElementById('download-links');
 
-        // *** UPDATED API ENDPOINT ***
-        const API_ENDPOINT = "https://api.cobalt.tools/api/json";
+        // *** NEW API ENDPOINT ***
+        const API_BASE_URL = "https://youtube-dl-api.vercel.app/api/info";
 
         // Event listener for the fetch button
         fetchBtn.addEventListener('click', handleFetchRequest);
@@ -104,7 +103,7 @@
         });
 
         /**
-         * Handles the entire process of fetching video info.
+         * Handles the entire process of fetching video info using the new API.
          */
         async function handleFetchRequest() {
             const youtubeUrl = urlInput.value.trim();
@@ -124,85 +123,50 @@
             clearResults();
 
             try {
-                const response = await fetch(API_ENDPOINT, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        url: youtubeUrl,
-                        vQuality: "1080", // Request a high quality to get options
-                        isAudioOnly: false
-                    })
-                });
+                // This new API uses a GET request
+                const response = await fetch(`${API_BASE_URL}?url=${encodeURIComponent(youtubeUrl)}`);
 
                 if (!response.ok) {
-                    throw new Error(`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ${response.statusText}`);
+                    throw new Error(`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ${response.status} ${response.statusText}`);
                 }
 
                 const data = await response.json();
                 
-                if (data.status === 'error' || data.status === 'redirect') {
-                    throw new Error(data.text || 'ไม่สามารถประมวลผลลิงก์ได้ ลองลิงก์อื่น');
+                if (!data.formats) {
+                    throw new Error('ไม่สามารถดึงข้อมูลรูปแบบวิดีโอได้');
                 }
-                
-                if (data.status === 'stream') {
-                    displayResults(data);
-                } else if (data.status === 'picker') { // Handle picker response type
-                    displayPickerResults(data);
-                }
-                 else {
-                     throw new Error('ไม่พบสตรีมวิดีโอสำหรับลิงก์นี้ หรือรูปแบบการตอบกลับไม่ถูกต้อง');
-                }
+
+                displayResults(data);
 
             } catch (error) {
                 console.error('Fetch error:', error);
-                showStatus(error.message, 'error');
+                showStatus(`เกิดข้อผิดพลาด: ${error.message}. กรุณาลองอีกครั้ง`, 'error');
             } finally {
                 setLoadingState(false);
             }
         }
 
         /**
-         * Displays results for 'stream' type response.
+         * Displays results from the new API.
          * @param {object} data - The API response data.
          */
         function displayResults(data) {
             resultsContainer.classList.remove('hidden');
             
             videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
-            // Use a proxy for the thumbnail to avoid potential mixed-content issues
-            videoThumbnail.src = data.thumbnail ? `https://images.weserv.nl/?url=${encodeURIComponent(data.thumbnail)}` : `https://i.ytimg.com/vi/${extractVideoID(urlInput.value.trim())}/hqdefault.jpg`;
+            videoThumbnail.src = data.thumbnail || 'https://placehold.co/128x72/334155/94a3b8?text=No+Image';
             videoThumbnail.onerror = () => { videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; };
             
             downloadLinksContainer.innerHTML = '';
 
-            const link = document.createElement('a');
-            link.href = data.url;
-            link.textContent = `ดาวน์โหลด (คุณภาพดีที่สุด)`;
-            link.setAttribute('download', '');
-            link.setAttribute('target', '_blank');
-            link.className = "bg-green-600 hover:bg-green-700 col-span-full text-white text-center font-medium py-3 px-4 rounded-lg transition duration-300 ease-in-out";
-            downloadLinksContainer.appendChild(link);
-        }
-
-        /**
-         * Displays results for 'picker' type response.
-         * @param {object} data - The API response data.
-         */
-        function displayPickerResults(data) {
-            resultsContainer.classList.remove('hidden');
-            videoTitle.textContent = data.title || 'ไม่มีชื่อวิดีโอ';
-            videoThumbnail.src = data.thumbnail ? `https://images.weserv.nl/?url=${encodeURIComponent(data.thumbnail)}` : `https://i.ytimg.com/vi/${extractVideoID(urlInput.value.trim())}/hqdefault.jpg`;
-            videoThumbnail.onerror = () => { videoThumbnail.src = 'https://placehold.co/128x72/334155/94a3b8?text=No+Image'; };
-
-            downloadLinksContainer.innerHTML = '';
-            
-            // Filter for video streams with audio
-            const videoStreams = data.picker
-                .filter(item => item.type === 'video' && item.audio === true)
-                .sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
+            // Filter for MP4 formats that have both video and audio
+            const videoStreams = data.formats
+                .filter(f => f.ext === 'mp4' && f.vcodec !== 'none' && f.acodec !== 'none')
+                .sort((a, b) => {
+                    const heightA = parseInt(a.resolution.split('x')[1]);
+                    const heightB = parseInt(b.resolution.split('x')[1]);
+                    return heightB - heightA;
+                });
 
             if (videoStreams.length === 0) {
                 showStatus('ไม่พบไฟล์วิดีโอ MP4 ที่มีเสียงสำหรับดาวน์โหลด', 'warning');
@@ -212,7 +176,9 @@
             videoStreams.forEach(stream => {
                 const link = document.createElement('a');
                 link.href = stream.url;
-                link.textContent = `${stream.quality}`;
+                // Use resolution as the label (e.g., 1280x720 -> 720p)
+                const qualityLabel = `${stream.resolution.split('x')[1]}p`;
+                link.textContent = qualityLabel;
                 link.setAttribute('download', '');
                 link.setAttribute('target', '_blank');
                 link.className = "bg-gray-600 hover:bg-gray-500 text-white text-center font-medium py-2 px-4 rounded-lg transition duration-300 ease-in-out";
@@ -278,18 +244,6 @@
             const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/;
             return youtubeRegex.test(url);
         }
-
-        /**
-         * Extracts Video ID from a YouTube URL.
-         * @param {string} url - The YouTube URL.
-         * @returns {string|null} The video ID or null.
-         */
-        function extractVideoID(url) {
-            const regex = /(?:v=|\/|embed\/|youtu.be\/)([a-zA-Z0-9_-]{11})/;
-            const matches = url.match(regex);
-            return matches ? matches[1] : null;
-        }
-
     </script>
 </body>
 </html>
